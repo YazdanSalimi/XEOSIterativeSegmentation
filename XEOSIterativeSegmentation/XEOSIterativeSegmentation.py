@@ -1545,33 +1545,40 @@ class XEOSIterativeSegmentationLogic(ScriptedLoadableModuleLogic):
             st     = _stats(newSeg)
             comment = ""
 
-            # Minimum-volume floor — note it but keep iterating
+            # Minimum-volume floor — lock in the LAST VALID segmentation
+            # (the one just before volume dropped below the floor) and keep
+            # iterating so the full curve is still visible in the plot.
             if lowestVolumeMl > 0 and volume <= lowestVolumeMl:
-                comment = f"Below minimum volume {lowestVolumeMl} mL"
+                comment = f"Below minimum volume {lowestVolumeMl} mL ← auto selected here"
+                if auto_thresh is None:
+                    # Use the previous iteration's result, not this one
+                    auto_thresh  = last_thresh
+                    auto_stats   = last_stats
+                    auto_seg_arr = last_seg_arr.copy()
 
             if previous_volume is not None and previous_volume > 0:
                 vol_change_pct = abs((volume - previous_volume) / previous_volume) * 100.0
             else:
                 vol_change_pct = None
 
-            if vol_change_pct is not None and vol_change_pct < plateauThreshold:
-                if not plateau_reached:
-                    plateau_reached = True
-                    comment = f"Plateau detected (Δvol {vol_change_pct:.2f}%)"
-                else:
-                    post_plateau_counter += 1
-                    comment = f"Post-plateau #{post_plateau_counter}"
+            # Plateau detection — only applies if minimum volume not yet hit
+            if auto_thresh is None:
+                if vol_change_pct is not None and vol_change_pct < plateauThreshold:
+                    if not plateau_reached:
+                        plateau_reached = True
+                        comment = f"Plateau detected (Δvol {vol_change_pct:.2f}%)"
+                    else:
+                        post_plateau_counter += 1
+                        comment = f"Post-plateau #{post_plateau_counter}"
 
-                # Lock in the auto result at the end of the post-plateau window —
-                # but do NOT break; continue recording the rest of the curve
-                if post_plateau_counter == postPlateauIterations and auto_thresh is None:
-                    auto_thresh   = float(thresh)
-                    auto_stats    = st
-                    auto_seg_arr  = newSeg.copy()
-                    comment += " ← auto selected"
-            else:
-                plateau_reached    = False
-                post_plateau_counter = 0
+                    if post_plateau_counter == postPlateauIterations:
+                        auto_thresh  = float(thresh)
+                        auto_stats   = st
+                        auto_seg_arr = newSeg.copy()
+                        comment += " ← auto selected"
+                else:
+                    plateau_reached      = False
+                    post_plateau_counter = 0
 
             records.append({
                 "lesion_index": lesionIdx,
